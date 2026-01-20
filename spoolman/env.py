@@ -466,3 +466,128 @@ def get_base_path() -> str:
 
     # Ensure it starts with / and does not end with /
     return "/" + path.strip("/")
+
+
+def is_mqtt_enabled() -> bool:
+    """Get whether MQTT client is enabled.
+
+    Returns False if no environment variable was set for MQTT enabled.
+
+    Returns:
+        bool: Whether MQTT client is enabled.
+
+    """
+    mqtt_enabled = os.getenv("SPOOLMAN_MQTT_ENABLED", "FALSE").upper()
+    if mqtt_enabled in {"FALSE", "0"}:
+        return False
+    if mqtt_enabled in {"TRUE", "1"}:
+        return True
+    raise ValueError(f"Failed to parse SPOOLMAN_MQTT_ENABLED variable: Unknown value '{mqtt_enabled}'.")
+
+
+def get_mqtt_host() -> str | None:
+    """Get the MQTT broker host from environment variables.
+
+    Returns None if no environment variable was set for the host.
+
+    Returns:
+        Optional[str]: The MQTT broker host.
+
+    """
+    return os.getenv("SPOOLMAN_MQTT_HOST")
+
+
+def get_mqtt_port() -> int:
+    """Get the MQTT broker port from environment variables.
+
+    Returns 8883 (Bambu Lab default) if not set.
+
+    Returns:
+        int: The MQTT broker port.
+
+    """
+    port = os.getenv("SPOOLMAN_MQTT_PORT", "8883")
+    try:
+        return int(port)
+    except ValueError as exc:
+        raise ValueError(f"Failed to parse SPOOLMAN_MQTT_PORT variable: {exc!s}") from exc
+
+
+def get_mqtt_username() -> str | None:
+    """Get the MQTT username from environment variables.
+
+    Returns None if no environment variable was set.
+
+    Returns:
+        Optional[str]: The MQTT username.
+
+    """
+    return os.getenv("SPOOLMAN_MQTT_USERNAME")
+
+
+def get_mqtt_password() -> str | None:
+    """Get the MQTT password from environment variables.
+
+    Returns None if no environment variable was set.
+
+    Returns:
+        Optional[str]: The MQTT password.
+
+    """
+    return os.getenv("SPOOLMAN_MQTT_PASSWORD")
+
+
+def get_mqtt_tls_enabled() -> bool:
+    """Get whether MQTT TLS/SSL is enabled.
+
+    Returns True by default (required for Bambu Lab).
+
+    Returns:
+        bool: Whether MQTT TLS is enabled.
+
+    """
+    mqtt_tls = os.getenv("SPOOLMAN_MQTT_TLS", "TRUE").upper()
+    if mqtt_tls in {"FALSE", "0"}:
+        return False
+    if mqtt_tls in {"TRUE", "1"}:
+        return True
+    raise ValueError(f"Failed to parse SPOOLMAN_MQTT_TLS variable: Unknown value '{mqtt_tls}'.")
+
+
+def get_mqtt_device_serial() -> str | None:
+    """Get the Bambu Lab device serial number from environment variables.
+
+    This is used to construct the MQTT topic: device/<serial>/report
+
+    Returns:
+        Optional[str]: The device serial number.
+
+    """
+    return os.getenv("SPOOLMAN_MQTT_DEVICE_SERIAL")
+
+
+def get_mqtt_ams_mappings() -> dict[str, int]:
+    """Get the AMS slot to Spoolman spool ID mappings.
+
+    Format: SPOOLMAN_MQTT_AMS_MAPPINGS=0:123,1:456,2:789,3:101
+    Where 0,1,2,3 are AMS slot numbers and 123,456,789,101 are Spoolman spool IDs
+
+    Returns:
+        dict[str, int]: Mapping of AMS slot (as string) to Spoolman spool ID.
+
+    """
+    mappings_str = os.getenv("SPOOLMAN_MQTT_AMS_MAPPINGS", "")
+    if not mappings_str:
+        return {}
+
+    mappings: dict[str, int] = {}
+    try:
+        for pair in mappings_str.split(","):
+            if ":" not in pair:
+                continue
+            slot, spool_id = pair.strip().split(":")
+            mappings[slot.strip()] = int(spool_id.strip())
+    except ValueError as exc:
+        raise ValueError(f"Failed to parse SPOOLMAN_MQTT_AMS_MAPPINGS variable: {exc!s}") from exc
+
+    return mappings
