@@ -1,5 +1,6 @@
 """Main entrypoint to the server."""
 
+import asyncio
 import logging
 import subprocess
 from logging.handlers import TimedRotatingFileHandler
@@ -46,6 +47,10 @@ if access_handlers:
 
 # Get logger instance for this module
 logger = logging.getLogger(__name__)
+
+# Global variable to store the MQTT client task
+mqtt_task: asyncio.Task | None = None
+mqtt_client = None
 
 
 # Setup FastAPI
@@ -143,6 +148,83 @@ def add_file_logging() -> None:
     root_logger.addHandler(file_handler)
 
 
+async def setup_mqtt_client() -> None:
+    """Setup and start the MQTT client for Bambu Lab integration."""
+    global mqtt_task, mqtt_client
+
+    logger.info("Setting up MQTT client for Bambu Lab integration...")
+
+    # Get configuration from environment
+    mqtt_host = env.get_mqtt_host()
+    mqtt_port = env.get_mqtt_port()
+    mqtt_username = env.get_mqtt_username()
+    mqtt_password = env.get_mqtt_password()
+    mqtt_device_serial = env.get_mqtt_device_serial()
+    mqtt_tls_enabled = env.get_mqtt_tls_enabled()
+    ams_mappings = env.get_mqtt_ams_mappings()
+
+    # Validate required configuration
+    if not mqtt_host:
+        logger.error("MQTT enabled but SPOOLMAN_MQTT_HOST is not set. MQTT client will not start.")
+        return
+
+    if not mqtt_username:
+        logger.error("MQTT enabled but SPOOLMAN_MQTT_USERNAME is not set. MQTT client will not start.")
+        return
+
+    if not mqtt_password:
+        logger.error("MQTT enabled but SPOOLMAN_MQTT_PASSWORD is not set. MQTT client will not start.")
+        return
+
+    if not mqtt_device_serial:
+        logger.error("MQTT enabled but SPOOLMAN_MQTT_DEVICE_SERIAL is not set. MQTT client will not start.")
+        return
+
+    if not ams_mappings:
+        logger.warning("MQTT enabled but no AMS mappings configured. No spools will be updated.")
+        logger.warning("Set SPOOLMAN_MQTT_AMS_MAPPINGS to map AMS slots to spool IDs (e.g., '0:123,1:456')")
+
+    # Import here to avoid circular imports and to only import if MQTT is enabled
+    from spoolman.integrations.bambu_mqtt import BambuMQTTClient
+
+    # Create MQTT client instance
+    mqtt_client = BambuMQTTClient(
+        host=mqtt_host,
+        port=mqtt_port,
+        username=mqtt_username,
+        password=mqtt_password,
+        device_serial=mqtt_device_serial,
+        tls_enabled=mqtt_tls_enabled,
+        ams_mappings=ams_mappings,
+    )
+
+    # Start the client in a background task
+    mqtt_task = asyncio.create_task(mqtt_client.run(database.get_db_session))
+    logger.info("MQTT client started in background")
+
+
+@app.on_event("shutdown")
+async def shutdown() -> None:
+    """Run the service's shutdown sequence."""
+    global mqtt_task, mqtt_client
+
+    logger.info("Shutting down...")
+
+    # Stop MQTT client if running
+    if mqtt_client:
+        logger.info("Stopping MQTT client...")
+        await mqtt_client.stop()
+
+    if mqtt_task:
+        mqtt_task.cancel()
+        try:
+            await mqtt_task
+        except asyncio.CancelledError:
+            pass
+
+    logger.info("Shutdown complete.")
+
+
 @app.on_event("startup")
 async def startup() -> None:
     """Run the service's startup sequence."""
@@ -177,6 +259,10 @@ async def startup() -> None:
     schedule = Scheduler()
     database.schedule_tasks(schedule)
     externaldb.schedule_tasks(schedule)
+
+    # Setup MQTT client if enabled
+    if env.is_mqtt_enabled():
+        await setup_mqtt_client()
 
     logger.info("Startup complete.")
 
